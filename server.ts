@@ -10,7 +10,7 @@ export function add(a: number, b: number): number {
 const html = await Deno.readTextFile("front/index.html");
 
 // Inicializa la simulación, que se actualizará periódicamente.
-const simulation = new Simulation();
+const simulation = new Simulation(5000, 4000, 3200);
 
 // Crea un servidor HTTP que responde según la URL.
 Deno.serve({

@@ -3,10 +3,23 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Simulación de Colisiones</title>
   <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100vw;
+      height: 100vh;
+      background-color: #f0f0f0;
+    }
     canvas {
-      border: 1px solid #000;
+      max-width: 100vw;
+      max-height: 100vh;
+      object-fit: contain;
       background-color: #eee;
     }
   </style>
@@ -14,18 +27,26 @@
 <body>
   <canvas id="canvas"></canvas>
   <script>
-    // Obtiene elementos del DOM.
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
 
-    // Solicita el tamaño de la simulación antes de conectar el WebSocket.
+    function resizeCanvas() {
+      const scale = Math.min(
+        window.innerWidth / canvas.width,
+        window.innerHeight / canvas.height
+      );
+      canvas.style.width = `${canvas.width * scale}px`;
+      canvas.style.height = `${canvas.height * scale}px`;
+    }
+
     fetch("/dimensions")
       .then(response => response.json())
       .then(dimensions => {
         canvas.width = dimensions.width;
         canvas.height = dimensions.height;
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
 
-        // Se conecta al WebSocket para recibir el estado de la simulación.
         const ws = new WebSocket("ws://localhost:8001");
 
         ws.onmessage = (event) => {
