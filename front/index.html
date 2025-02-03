@@ -1,0 +1,54 @@
+<!-- front/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Simulación de Colisiones</title>
+  <style>
+    canvas {
+      border: 1px solid #000;
+      background-color: #eee;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <script>
+    // Obtiene elementos del DOM.
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    // Solicita el tamaño de la simulación antes de conectar el WebSocket.
+    fetch("/dimensions")
+      .then(response => response.json())
+      .then(dimensions => {
+        canvas.width = dimensions.width;
+        canvas.height = dimensions.height;
+
+        // Se conecta al WebSocket para recibir el estado de la simulación.
+        const ws = new WebSocket("ws://localhost:8001");
+
+        ws.onmessage = (event) => {
+          const state = JSON.parse(event.data);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          state.particles.forEach(particle => {
+            ctx.beginPath();
+            ctx.arc(particle.x, particle.y, particle.radius, 0, 2 * Math.PI);
+            ctx.fillStyle = "blue";
+            ctx.fill();
+            ctx.stroke();
+          });
+        };
+
+        ws.onopen = () => {
+          console.log("Conectado al WebSocket");
+        };
+
+        ws.onerror = (err) => {
+          console.error("Error en WebSocket:", err);
+        };
+      })
+      .catch(err => console.error("Error al obtener dimensiones:", err));
+  </script>
+</body>
+</html>
