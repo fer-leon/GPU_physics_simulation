@@ -1,8 +1,3 @@
-// back/simulation.ts
-// La clase Simulation gestiona la simulación de partículas, actualizándolas
-// dividiéndolas en substeps para simular un movimiento suave. Ahora se utiliza
-// la función optimizada de detección de colisiones basada en spatial partitioning.
-
 import { Particle } from "./particle.ts";
 // Se elimina el uso de solveCollision de collisionSolver.ts para emplear la versión optimizada.
 import { spatialPartitioning } from "./grid.ts";

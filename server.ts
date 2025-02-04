@@ -44,6 +44,10 @@ setInterval(() => {
   const state = simulation.getState();
   // Se envía el estado actualizado a todos los clientes conectados.
   for (const client of wss.clients) {
-    client.send(state);
+    try {
+      client.send(state);
+    } catch (error) {
+      console.error("Error al enviar a cliente:", error);
+    }
   }
 }, frameTime * 1000);

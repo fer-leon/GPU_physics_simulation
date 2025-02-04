@@ -5,42 +5,42 @@ export function spatialPartitioning(particles: Particle[], width: number, height
     const restitution = 0.9;
     const cellSize = 50;
 
-    // Handle boundary collisions using provided width and height
+    // Resolver colisiones con los límites
     for (const particle of particles) {
         resolveBoundaryCollision(particle, width, height, restitution);
     }
 
-    const grid = new Map<string, Particle[]>();
+    const columns = Math.ceil(width / cellSize);
+    const rows = Math.ceil(height / cellSize);
+    const grid: Particle[][] = new Array(columns * rows).fill(null).map(() => []);
 
-    // Partition space
+    // Particionar el espacio en la grilla sin strings
     for (const p of particles) {
         const cellX = Math.floor(p.x / cellSize);
         const cellY = Math.floor(p.y / cellSize);
-        const key = `${cellX},${cellY}`;
-        if (!grid.has(key)) {
-            grid.set(key, []);
-        }
-        grid.get(key)!.push(p);
+        const index = cellX + cellY * columns;
+        grid[index].push(p);
     }
 
-    // Check collisions in neighboring cells
-    for (const [key, cellParticles] of grid) {
-        const [cellX, cellY] = key.split(",").map(Number);
-        for (let offsetX = -1; offsetX <= 1; offsetX++) {
+    // Chequear colisiones en las celdas y sus vecinas
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < columns; x++) {
+            const index = x + y * columns;
+            const cellParticles = grid[index];
             for (let offsetY = -1; offsetY <= 1; offsetY++) {
-                const neighborX = cellX + offsetX;
-                const neighborY = cellY + offsetY;
-                const neighborKey = `${neighborX},${neighborY}`;
-                if (neighborKey < key) continue;
-                const neighborParticles = grid.get(neighborKey);
-                if (!neighborParticles) continue;
-                for (let i = 0; i < cellParticles.length; i++) {
-                    const startIndex = (neighborKey === key) ? i + 1 : 0;
-                    for (let j = startIndex; j < neighborParticles.length; j++) {
-                        const a = cellParticles[i];
-                        const b = neighborParticles[j];
-                        if (a === b) continue;
-                        resolveParticleCollision(a, b, restitution);
+                const ny = y + offsetY;
+                if (ny < 0 || ny >= rows) continue;
+                for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                    const nx = x + offsetX;
+                    if (nx < 0 || nx >= columns) continue;
+                    const nIndex = nx + ny * columns;
+                    if (nIndex < index) continue; // evita revisar pares duplicados
+                    const neighborParticles = grid[nIndex];
+                    for (let i = 0; i < cellParticles.length; i++) {
+                        const startIndex = (nIndex === index) ? i + 1 : 0;
+                        for (let j = startIndex; j < neighborParticles.length; j++) {
+                            resolveParticleCollision(cellParticles[i], neighborParticles[j], restitution);
+                        }
                     }
                 }
             }
