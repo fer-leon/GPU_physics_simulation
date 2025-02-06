@@ -1,23 +1,44 @@
 import { Particle } from "./particle.ts";
 import { resolveBoundaryCollision, resolveParticleCollision } from "./collision.ts";
 
+// Module-level cache for grid reuse.
+let cachedGrid: Particle[][] | null = null;
+let cachedCols = 0;
+let cachedRows = 0;
+
 export function spatialPartitioning(
     particles: Particle[],
     width: number,
     height: number,
 ): void {
     const restitution = 0.9;
-    const maxRadius = Math.max(...particles.map(p => p.radius));
+    // Use a for-loop to compute maxRadius (avoids creating an interim array).
+    let maxRadius = 0;
+    for (const p of particles) {
+        if (p.radius > maxRadius) {
+            maxRadius = p.radius;
+        }
+    }
     const cellSize = Math.max(60, maxRadius * 3);
     const cols = Math.ceil(width / cellSize);
     const rows = Math.ceil(height / cellSize);
-    const grid: Particle[][] = new Array(cols * rows);
     
-    // 1. Inicializar grid y resolver bordes
-    for (let i = 0; i < grid.length; i++) grid[i] = [];
+    let grid: Particle[][];
+    // Reuse cached grid if available and dimensions match.
+    if (cachedGrid && cachedCols === cols && cachedRows === rows) {
+        grid = cachedGrid;
+        for (let i = 0; i < grid.length; i++) grid[i].length = 0;
+    } else {
+        grid = new Array(cols * rows);
+        for (let i = 0; i < grid.length; i++) grid[i] = [];
+        cachedGrid = grid;
+        cachedCols = cols;
+        cachedRows = rows;
+    }
+    
+    // 1. Initialize grid and resolve boundary collisions
     for (const p of particles) {
-        // Optimización: Variables locales para accesos frecuentes
-        const x = p.x, y = p.y, r = p.radius;
+        const { x, y, radius: r } = p;
         if (x - r < 0 || x + r > width || y - r < 0 || y + r > height) {
             resolveBoundaryCollision(p, width, height, restitution);
         }
@@ -27,22 +48,21 @@ export function spatialPartitioning(
         if (idx < grid.length) grid[idx].push(p);
     }
     
-
-    // 2. Detección de colisiones optimizada utilizando vecinos reales
+    // 2. Collision detection using neighbor cells
     const neighborOffsets = [
         { dx: 1, dy: 0 },
         { dx: -1, dy: 1 },
         { dx: 0, dy: 1 },
         { dx: 1, dy: 1 },
     ];
-
+    
     for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
             const idx = col + row * cols;
             const cell = grid[idx];
             if (cell.length === 0) continue;
             
-            // A. Colisiones dentro de la misma celda (pares únicos)
+            // A. Collisions within the cell
             for (let i = 0; i < cell.length; i++) {
                 const p1 = cell[i];
                 for (let j = i + 1; j < cell.length; j++) {
@@ -51,10 +71,10 @@ export function spatialPartitioning(
                 }
             }
             
-            // B. Colisiones con celdas vecinas
-            for (const offset of neighborOffsets) {
-                const nCol = col + offset.dx;
-                const nRow = row + offset.dy;
+            // B. Collisions with neighboring cells
+            for (const { dx, dy } of neighborOffsets) {
+                const nCol = col + dx;
+                const nRow = row + dy;
                 if (nCol < 0 || nCol >= cols || nRow < 0 || nRow >= rows) continue;
                 const neighborIdx = nCol + nRow * cols;
                 const neighbor = grid[neighborIdx];
@@ -68,7 +88,4 @@ export function spatialPartitioning(
             }
         }
     }
-
-    // 3. Limpieza eficiente (reutiliza arrays)
-    for (const cell of grid) cell.length = 0;
 }
