@@ -1,91 +1,83 @@
 import { Particle } from "./particle.ts";
-import { resolveBoundaryCollision, resolveParticleCollision } from "./collision.ts";
+import { CollisionResult } from "./collision.ts";
 
-// Module-level cache for grid reuse.
-let cachedGrid: Particle[][] | null = null;
-let cachedCols = 0;
-let cachedRows = 0;
+// Número de workers a usar
+const WORKER_COUNT = 4;
+const workerPool: Worker[] = [];
+const particleMap = new Map<number, Particle>();
 
-export function spatialPartitioning(
+// Usar un SharedArrayBuffer que se actualiza en cada frame
+export async function parallelSpatialPartitioning(
     particles: Particle[],
     width: number,
     height: number,
-): void {
+): Promise<void> {
     const restitution = 0.9;
-    // Use a for-loop to compute maxRadius (avoids creating an interim array).
-    let maxRadius = 0;
-    for (const p of particles) {
-        if (p.radius > maxRadius) {
-            maxRadius = p.radius;
+    const maxRadius = Math.max(...particles.map(p => p.radius));
+    const cellSize = Math.max(30, maxRadius * 2);
+
+    // Actualizar mapa de partículas
+    particleMap.clear();
+    particles.forEach(p => particleMap.set(p.id, p));
+
+    // Empaquetar datos en un Float32Array:
+    const count = particles.length;
+    // Crear un SharedArrayBuffer que contiene count * 7 * 4 bytes (Float32)
+    const sab = new SharedArrayBuffer(count * 7 * 4);
+    const data = new Float32Array(sab);
+    particles.forEach((p, i) => {
+        const i7 = i * 7;
+        data[i7] = p.id;      // id como número
+        data[i7 + 1] = p.x;
+        data[i7 + 2] = p.y;
+        data[i7 + 3] = p.vx;
+        data[i7 + 4] = p.vy;
+        data[i7 + 5] = p.mass;
+        data[i7 + 6] = p.radius;
+    });
+
+    // Inicializar el pool, si aún no está creado.
+    if (workerPool.length < WORKER_COUNT) {
+        for (let i = workerPool.length; i < WORKER_COUNT; i++) {
+            const worker = new Worker(new URL("./grid.worker.ts", import.meta.url).href, { type: "module" });
+            workerPool.push(worker);
         }
     }
-    const cellSize = Math.max(60, maxRadius * 3);
-    const cols = Math.ceil(width / cellSize);
-    const rows = Math.ceil(height / cellSize);
-    
-    let grid: Particle[][];
-    // Reuse cached grid if available and dimensions match.
-    if (cachedGrid && cachedCols === cols && cachedRows === rows) {
-        grid = cachedGrid;
-        for (let i = 0; i < grid.length; i++) grid[i].length = 0;
-    } else {
-        grid = new Array(cols * rows);
-        for (let i = 0; i < grid.length; i++) grid[i] = [];
-        cachedGrid = grid;
-        cachedCols = cols;
-        cachedRows = rows;
-    }
-    
-    // 1. Initialize grid and resolve boundary collisions
-    for (const p of particles) {
-        const { x, y, radius: r } = p;
-        if (x - r < 0 || x + r > width || y - r < 0 || y + r > height) {
-            resolveBoundaryCollision(p, width, height, restitution);
-        }
-        const cellX = Math.floor(x / cellSize);
-        const cellY = Math.floor(y / cellSize);
-        const idx = cellX + cellY * cols;
-        if (idx < grid.length) grid[idx].push(p);
-    }
-    
-    // 2. Collision detection using neighbor cells
-    const neighborOffsets = [
-        { dx: 1, dy: 0 },
-        { dx: -1, dy: 1 },
-        { dx: 0, dy: 1 },
-        { dx: 1, dy: 1 },
-    ];
-    
-    for (let row = 0; row < rows; row++) {
-        for (let col = 0; col < cols; col++) {
-            const idx = col + row * cols;
-            const cell = grid[idx];
-            if (cell.length === 0) continue;
-            
-            // A. Collisions within the cell
-            for (let i = 0; i < cell.length; i++) {
-                const p1 = cell[i];
-                for (let j = i + 1; j < cell.length; j++) {
-                    const p2 = cell[j];
-                    resolveParticleCollision(p1, p2, restitution);
-                }
-            }
-            
-            // B. Collisions with neighboring cells
-            for (const { dx, dy } of neighborOffsets) {
-                const nCol = col + dx;
-                const nRow = row + dy;
-                if (nCol < 0 || nCol >= cols || nRow < 0 || nRow >= rows) continue;
-                const neighborIdx = nCol + nRow * cols;
-                const neighbor = grid[neighborIdx];
-                if (neighbor.length === 0) continue;
-                
-                for (const p1 of cell) {
-                    for (const p2 of neighbor) {
-                        resolveParticleCollision(p1, p2, restitution);
-                    }
-                }
-            }
-        }
-    }
+
+    const promises: Promise<CollisionResult[]>[] = workerPool.map((worker, idx) => {
+        return new Promise(resolve => {
+            worker.addEventListener("message", (e) => resolve(e.data), { once: true });
+            worker.postMessage({
+                buffer: sab,
+                count,
+                width,
+                height,
+                cellSize,
+                restitution,
+                workerIndex: idx,
+                workerCount: WORKER_COUNT,
+            });
+        });
+    });
+
+    // Esperar resultados de todos los workers y unirlos
+    const collisionChangesArrays = await Promise.all(promises);
+    const collisionChanges = collisionChangesArrays.flat();
+
+    // Actualizar partículas con los cambios detectados
+    collisionChanges.forEach(change => {
+        const p = particleMap.get(change.id)!;
+        if (change.x !== undefined) p.x = change.x;
+        if (change.y !== undefined) p.y = change.y;
+        if (change.vx !== undefined) p.vx = change.vx;
+        if (change.vy !== undefined) p.vy = change.vy;
+    });
+}
+
+// Nueva función para terminar el pool de workers
+export function terminateWorkerPool(): void {
+  while (workerPool.length > 0) {
+    const worker = workerPool.pop();
+    worker?.terminate();
+  }
 }

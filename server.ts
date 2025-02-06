@@ -1,16 +1,12 @@
 import { WebSocketServer } from "https://deno.land/x/websocket@v0.1.4/mod.ts";
 import { Simulation } from "./back/simulation.ts";
 
-// Función exportada para realizar pruebas unitarias.
-export function add(a: number, b: number): number {
-  return a + b;
-}
-
 // Se lee el HTML del cliente desde el sistema de archivos.
 const html = await Deno.readTextFile("front/index.html");
 
 // Inicializa la simulación, que se actualizará periódicamente.
 const simulation = new Simulation(5000, 4000, 3200);
+let simulationInterval: number | null = null;
 
 // Crea un servidor HTTP que responde según la URL.
 Deno.serve({
@@ -39,15 +35,26 @@ wss.on("connection", (_ws) => {
 
 // Intervalo de actualización para la simulación (aprox. 60 fps)
 const frameTime = 0.016; // en segundos
-setInterval(() => {
-  simulation.simulateFrame(frameTime);
-  const state = simulation.getState();
+simulationInterval = setInterval(async () => {
+  await simulation.simulateFrame(frameTime);
+  const stateBuffer = simulation.getStateBuffer();
   // Se envía el estado actualizado a todos los clientes conectados.
   for (const client of wss.clients) {
     try {
-      client.send(state);
+      client.send(new Uint8Array(stateBuffer));
     } catch (error) {
       console.error("Error al enviar a cliente:", error);
     }
   }
 }, frameTime * 1000);
+
+// Función para detener la simulación, por ejemplo, al recibir cierta señal
+export function stopSimulation(): void {
+  if (simulationInterval !== null) {
+    clearInterval(simulationInterval);
+    simulationInterval = null;
+  }
+  // Terminar los workers creados
+  import("./back/grid.ts").then(({ terminateWorkerPool }) => terminateWorkerPool());
+  console.log("Simulación detenida.");
+}

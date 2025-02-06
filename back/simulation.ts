@@ -1,6 +1,5 @@
 import { Particle } from "./particle.ts";
-// Se elimina el uso de solveCollision de collisionSolver.ts para emplear la versión optimizada.
-import { spatialPartitioning } from "./grid.ts";
+import { parallelSpatialPartitioning } from "./grid.ts";
 
 export class Simulation {
   particles: Particle[];
@@ -11,50 +10,45 @@ export class Simulation {
     this.width = width;
     this.height = height;
     this.particles = [];
+    
     for (let i = 0; i < particleCount; i++) {
-      // Masa aleatoria entre 1 y 5
       const mass = 1 + Math.random() * 4;
-      // Radio proporcional a la masa (entre 5 y 15)
       const radius = 5 + (mass - 1) * 2.5;
-
+      
       const p = new Particle(
         Math.random() * width,
         Math.random() * height,
-        mass, // masa aleatoria
-        radius, // radio proporcional
+        mass,
+        radius,
       );
-      // Se asigna una velocidad inicial aleatoria.
+      
       p.vx = (Math.random() - 0.5) * 100;
       p.vy = (Math.random() - 0.5) * 100;
       this.particles.push(p);
     }
   }
 
-  // Calcula un frame entero de simulación dividido en 4 substeps.
-  simulateFrame(deltaTime: number): void {
+  async simulateFrame(deltaTime: number): Promise<void> {
     const substepTime = deltaTime / 4;
+    // Realizar integración física en 4 subpasos
     for (let i = 0; i < 4; i++) {
-      // Se actualiza la posición de las partículas.
       this.updateParticles(substepTime);
-      // Se aplican las colisiones con optimización de spatial partitioning.
-      spatialPartitioning(this.particles, this.width, this.height);
     }
+    // Ejecutar detección de colisiones una sola vez
+    await parallelSpatialPartitioning(this.particles, this.width, this.height);
   }
 
-  // Actualiza la posición de las partículas en función de su velocidad y aceleración.
   updateParticles(delta: number): void {
     for (const particle of this.particles) {
       particle.vx += particle.ax * delta;
       particle.vy += particle.ay * delta;
       particle.x += particle.vx * delta;
       particle.y += particle.vy * delta;
-      // Se reinicia la aceleración tras actualizar la posición.
       particle.ax = 0;
       particle.ay = 0;
     }
   }
 
-  // Serializa el estado actual para enviarlo al frontend vía WebSocket.
   getState(): string {
     return JSON.stringify({
       particles: this.particles.map((p) => ({
@@ -63,5 +57,23 @@ export class Simulation {
         radius: p.radius,
       })),
     });
+  }
+
+  getStateBuffer(): ArrayBuffer {
+    const n = this.particles.length;
+    // 4 bytes para numero de partículas y 12 bytes por partícula (x, y, radio)
+    const buffer = new ArrayBuffer(4 + n * 12);
+    const view = new DataView(buffer);
+    view.setUint32(0, n, true);
+    let offset = 4;
+    for (const p of this.particles) {
+      view.setFloat32(offset, p.x, true);
+      offset += 4;
+      view.setFloat32(offset, p.y, true);
+      offset += 4;
+      view.setFloat32(offset, p.radius, true);
+      offset += 4;
+    }
+    return buffer;
   }
 }

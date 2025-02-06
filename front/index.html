@@ -1,75 +1,116 @@
 <!-- front/index.html -->
 <!DOCTYPE html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simulación de Colisiones</title>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      width: 100vw;
-      height: 100vh;
-      background-color: #f0f0f0;
-    }
-    canvas {
-      max-width: 100vw;
-      max-height: 100vh;
-      object-fit: contain;
-      background-color: #eee;
-    }
-  </style>
-</head>
-<body>
-  <canvas id="canvas"></canvas>
-  <script>
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simulación de Colisiones</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100vw;
+        height: 100vh;
+        background-color: #f0f0f0;
+      }
+      canvas {
+        background-color: #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <script>
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      let previousState = null;
+      let currentState = null;
+      let lastUpdate = performance.now();
 
-    function resizeCanvas() {
-      const scale = Math.min(
-        window.innerWidth / canvas.width,
-        window.innerHeight / canvas.height
-      );
-      canvas.style.width = `${canvas.width * scale}px`;
-      canvas.style.height = `${canvas.height * scale}px`;
-    }
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
 
-    fetch("/dimensions")
-      .then(response => response.json())
-      .then(dimensions => {
-        canvas.width = dimensions.width;
-        canvas.height = dimensions.height;
-        resizeCanvas();
-        window.addEventListener('resize', resizeCanvas);
+      // Conexión WebSocket para recibir estados de simulación
+      const ws = new WebSocket("ws://localhost:8001");
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          const view = new DataView(event.data);
+          const n = view.getUint32(0, true);
+          const particles = [];
+          let offset = 4;
+          for (let i = 0; i < n; i++) {
+            const x = view.getFloat32(offset, true);
+            offset += 4;
+            const y = view.getFloat32(offset, true);
+            offset += 4;
+            const radius = view.getFloat32(offset, true);
+            offset += 4;
+            particles.push({ x, y, radius });
+          }
+          // Inicializar ambos estados en la primera recepción
+          if (!currentState) {
+            currentState = { particles };
+            previousState = { particles };
+          } else {
+            previousState = currentState;
+            currentState = { particles };
+          }
+        }
+        lastUpdate = performance.now();
+      };
+      ws.onopen = () => {
+        console.log("Conectado al WebSocket");
+      };
+      ws.onerror = (err) => {
+        console.error("Error en WebSocket:", err);
+      };
 
-        const ws = new WebSocket("ws://localhost:8001");
+      // Función para interpolar entre dos estados
+      function interpolate(prev, curr, t) {
+        if (!previousState || !currentState) return; // Evita acceso a propiedades de null
+        const interpParticles = curr.particles.map((p, i) => {
+          if (!prev || !prev.particles[i]) return p;
+          const pPrev = prev.particles[i];
+          return {
+            x: pPrev.x + (p.x - pPrev.x) * t,
+            y: pPrev.y + (p.y - pPrev.y) * t,
+            radius: p.radius, // Suponiendo que el radio no cambia
+          };
+        });
+        return { particles: interpParticles };
+      }
 
-        ws.onmessage = (event) => {
-          const state = JSON.parse(event.data);
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          state.particles.forEach(particle => {
+      // Bucle de renderizado con requestAnimationFrame
+      function render() {
+        requestAnimationFrame(render);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Calcula el factor de interpolación basado en el tiempo transcurrido
+        const now = performance.now();
+        // Supongamos que esperamos recibir actualizaciones a 60 fps (cada ~16ms)
+        const delta = now - lastUpdate;
+        let t = Math.min(delta / 16, 1);
+        // Si no se tiene estado previo, se usa el actual directamente
+        const displayState = interpolate(previousState, currentState, t) || currentState;
+
+        if (displayState && displayState.particles) {
+          displayState.particles.forEach(particle => {
             ctx.beginPath();
             ctx.arc(particle.x, particle.y, particle.radius, 0, 2 * Math.PI);
             ctx.fillStyle = "blue";
             ctx.fill();
             ctx.stroke();
           });
-        };
-
-        ws.onopen = () => {
-          console.log("Conectado al WebSocket");
-        };
-
-        ws.onerror = (err) => {
-          console.error("Error en WebSocket:", err);
-        };
-      })
-      .catch(err => console.error("Error al obtener dimensiones:", err));
-  </script>
-</body>
+        }
+      }
+      render();
+    </script>
+  </body>
 </html>

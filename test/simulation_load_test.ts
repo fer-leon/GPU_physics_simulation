@@ -5,13 +5,13 @@ const testDurationMs = 1000;
 const frameTime = 0.016;
 const iterations = 5;
 
-function runSingleFPSTest(particleCount: number): number {
+async function runSingleFPSTest(particleCount: number): Promise<number> {
   const sim = new Simulation(particleCount, 4000, 3200);
   const startTime = performance.now();
   let frames = 0;
   
   while (performance.now() - startTime < testDurationMs) {
-    sim.simulateFrame(frameTime);
+    await sim.simulateFrame(frameTime);
     frames++;
   }
   
@@ -19,11 +19,11 @@ function runSingleFPSTest(particleCount: number): number {
   return frames / actualDuration;
 }
 
-function runAverageFPSTest(particleCount: number, fpsThreshold: number) {
+async function runAverageFPSTest(particleCount: number, fpsThreshold: number) {
   const fpsList: number[] = [];
   
   for (let i = 0; i < iterations; i++) {
-    fpsList.push(runSingleFPSTest(particleCount));
+    fpsList.push(await runSingleFPSTest(particleCount));
   }
   
   const avgFps = fpsList.reduce((a, b) => a + b) / iterations;
