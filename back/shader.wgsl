@@ -14,27 +14,26 @@ struct SimParams {
     deltaTime: f32,
     restitution: f32,
     cellSize: f32,
-    gridCols: u32,
-    gridRows: u32,
     particleCount: u32,
+    subgroupSize: u32,
+    maxCollisionChecks: u32,
 }
 
-@group(0) @binding(0) var<storage, read> particlesIn: array<Particle>;
-@group(0) @binding(1) var<storage, read_write> particlesOut: array<Particle>;
-@group(0) @binding(2) var<uniform> params: SimParams;
-@group(0) @binding(3) var<storage, read_write> grid: array<atomic<u32>>;
-@group(0) @binding(4) var<storage, read_write> cellCounts: array<atomic<u32>>;
+struct Grid {
+    counts: array<atomic<u32>>,
+    data: array<atomic<u32>>,
+}
+
+@group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
+@group(0) @binding(1) var<uniform> params: SimParams;
+@group(0) @binding(2) var<storage, read_write> grid: Grid;
 
 var<workgroup> sharedParticles: array<Particle, 256>;
-var<workgroup> sharedCounts: array<u32, 256>;
+var<workgroup> collisionCounter: atomic<u32>;
 
-fn getGridIndex(x: f32, y: f32) -> i32 {
-    let cellX = i32(x / params.cellSize);
-    let cellY = i32(y / params.cellSize);
-    if (cellX < 0 || cellX >= i32(params.gridCols) || cellY < 0 || cellY >= i32(params.gridRows)) {
-        return -1;
-    }
-    return cellY * i32(params.gridCols) + cellX;
+fn getGridIndex(x: f32, y: f32) -> u32 {
+    let cols = u32(params.width / params.cellSize);
+    return (u32(y / params.cellSize) * cols) + u32(x / params.cellSize);
 }
 
 fn resolveCollision(p1: ptr<function, Particle>, p2: ptr<function, Particle>) -> bool {
@@ -46,128 +45,214 @@ fn resolveCollision(p1: ptr<function, Particle>, p2: ptr<function, Particle>) ->
     
     if (distSq >= minDistSq || distSq == 0.0) { return false; }
     
-    let distance = sqrt(distSq);
-    let nx = dx / distance;
-    let ny = dy / distance;
+    // Avoid sqrt if possible using squared distances
+    if (distSq > 0.0) {
+        let dist = sqrt(distSq);
+        let nx = dx / dist;
+        let ny = dy / dist;
+        let dvx = (*p2).vx - (*p1).vx;
+        let dvy = (*p2).vy - (*p1).vy;
+        let relativeSpeed = dvx * nx + dvy * ny;
+        
+        if (relativeSpeed > 0.0) { return false; }
+        
+        let j = -(1.0 + params.restitution) * relativeSpeed;
+        let impulse = j / (1.0 / (*p1).mass + 1.0 / (*p2).mass);
+        
+        (*p1).vx = (*p1).vx - impulse * nx / (*p1).mass;
+        (*p1).vy = (*p1).vy - impulse * ny / (*p1).mass;
+        (*p2).vx = (*p2).vx + impulse * nx / (*p2).mass;
+        (*p2).vy = (*p2).vy + impulse * ny / (*p2).mass;
+        
+        // Calculate separation
+        let overlap = (minDist - dist) * 0.5;
+        (*p1).x = (*p1).x - nx * overlap;
+        (*p1).y = (*p1).y - ny * overlap;
+        (*p2).x = (*p2).x + nx * overlap;
+        (*p2).y = (*p2).y + ny * overlap;
+        
+        return true;
+    }
+    return false;
+}
+
+fn resolveCollisionSimple(p1: ptr<function, Particle>, p2: ptr<function, Particle>) -> bool {
+    let dx = (*p2).x - (*p1).x;
+    let dy = (*p2).y - (*p1).y;
+    let distSq = dx * dx + dy * dy;
+    let minDist = (*p1).radius + (*p2).radius;
+    let minDistSq = minDist * minDist;
+    
+    // Ignorar partículas que no están en contacto
+    if (distSq >= minDistSq || distSq == 0.0) { return false; }
+    
+    let dist = sqrt(distSq);
+    let nx = dx / dist;
+    let ny = dy / dist;
+    
+    // Primero separamos las partículas
+    let overlap = (minDist - dist);
+    let totalMass = (*p1).mass + (*p2).mass;
+    let p1Ratio = (*p2).mass / totalMass;
+    let p2Ratio = (*p1).mass / totalMass;
+    
+    (*p1).x = (*p1).x - nx * overlap * p1Ratio;
+    (*p1).y = (*p1).y - ny * overlap * p1Ratio;
+    (*p2).x = (*p2).x + nx * overlap * p2Ratio;
+    (*p2).y = (*p2).y + ny * overlap * p2Ratio;
+    
+    // Calcular velocidad relativa
     let dvx = (*p2).vx - (*p1).vx;
     let dvy = (*p2).vy - (*p1).vy;
-    var impulse = -(1.0 + params.restitution) * (dvx * nx + dvy * ny);
-    impulse = impulse / (1.0 / (*p1).mass + 1.0 / (*p2).mass);
+    let normalVel = dvx * nx + dvy * ny;
     
-    (*p1).vx = (*p1).vx - impulse * nx / (*p1).mass;
-    (*p1).vy = (*p1).vy - impulse * ny / (*p1).mass;
-    (*p2).vx = (*p2).vx + impulse * nx / (*p2).mass;
-    (*p2).vy = (*p2).vy + impulse * ny / (*p2).mass;
+    // Solo resolver colisión si las partículas se acercan
+    if (normalVel >= 0.0) { return true; }
     
-    let overlap = (minDist - distance) * 0.5;
-    (*p1).x = (*p1).x - nx * overlap;
-    (*p1).y = (*p1).y - ny * overlap;
-    (*p2).x = (*p2).x + nx * overlap;
-    (*p2).y = (*p2).y + ny * overlap;
+    // Calcular impulso con masa
+    let restitution = params.restitution;
+    let j = -(1.0 + restitution) * normalVel;
+    j = j / (1.0/(*p1).mass + 1.0/(*p2).mass);
+    
+    // Aplicar impulso
+    (*p1).vx = (*p1).vx - j * nx / (*p1).mass;
+    (*p1).vy = (*p1).vy - j * ny / (*p1).mass;
+    (*p2).vx = (*p2).vx + j * nx / (*p2).mass;
+    (*p2).vy = (*p2).vy + j * ny / (*p2).mass;
     
     return true;
 }
 
-fn checkBoundaries(p: ptr<function, Particle>) {
-    if ((*p).x + (*p).radius > params.width) {
-        (*p).x = params.width - (*p).radius;
-        (*p).vx = -abs((*p).vx) * params.restitution;
-    }
-    if ((*p).x - (*p).radius < 0.0) {
-        (*p).x = (*p).radius;
-        (*p).vx = abs((*p).vx) * params.restitution;
-    }
-    if ((*p).y + (*p).radius > params.height) {
-        (*p).y = params.height - (*p).radius;
-        (*p).vy = -abs((*p).vy) * params.restitution;
-    }
-    if ((*p).y - (*p).radius < 0.0) {
-        (*p).y = (*p).radius;
-        (*p).vy = abs((*p).vy) * params.restitution;
-    }
-}
-
 @compute @workgroup_size(256)
-fn updatePositions(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>) {
+fn updatePositions(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let index = global_id.x;
     if (index >= params.particleCount) {
         return;
     }
 
-    // Cargar partícula en memoria compartida
-    sharedParticles[local_id.x] = particlesIn[index];
-    var particle = &sharedParticles[local_id.x];
+    var particle = particles[index];
     
-    // Update position
-    (*particle).x = (*particle).x + (*particle).vx * params.deltaTime;
-    (*particle).y = (*particle).y + (*particle).vy * params.deltaTime;
+    // Aplicar límite de velocidad
+    let maxSpeed = 200.0;
+    let currentSpeed = sqrt(particle.vx * particle.vx + particle.vy * particle.vy);
+    if (currentSpeed > maxSpeed) {
+        let scale = maxSpeed / currentSpeed;
+        particle.vx *= scale;
+        particle.vy *= scale;
+    }
     
-    // Check boundaries
-    checkBoundaries(particle);
+    // Actualizar posición con fricción
+    let dt = params.deltaTime;
+    let friction = 0.999;
+    particle.vx *= friction;
+    particle.vy *= friction;
     
-    // Guardar la partícula actualizada
-    particlesOut[index] = *particle;
+    particle.x = particle.x + particle.vx * dt;
+    particle.y = particle.y + particle.vy * dt;
     
-    // Asignar a la cuadrícula
-    let cellIndex = getGridIndex((*particle).x, (*particle).y);
-    if (cellIndex >= 0) {
-        let count = atomicAdd(&cellCounts[cellIndex], 1u);
-        if (count < 64u) {
-            let gridIndex = cellIndex * 64 + i32(count);
-            atomicStore(&grid[gridIndex], index);
+    // Colisiones con bordes
+    let maxX = params.width - particle.radius;
+    let maxY = params.height - particle.radius;
+    let minX = particle.radius;
+    let minY = particle.radius;
+    
+    if (particle.x < minX) {
+        particle.x = minX;
+        particle.vx = abs(particle.vx) * params.restitution;
+    } else if (particle.x > maxX) {
+        particle.x = maxX;
+        particle.vx = -abs(particle.vx) * params.restitution;
+    }
+    
+    if (particle.y < minY) {
+        particle.y = minY;
+        particle.vy = abs(particle.vy) * params.restitution;
+    } else if (particle.y > maxY) {
+        particle.y = maxY;
+        particle.vy = -abs(particle.vy) * params.restitution;
+    }
+    
+    // Actualizar grid
+    let gridIndex = getGridIndex(particle.x, particle.y);
+    let count = atomicAdd(&grid.counts[gridIndex], 1u);
+    if (count < 64u) {
+        atomicStore(&grid.data[gridIndex * 64u + count], index);
+    }
+    
+    particles[index] = particle;
+}
+
+@compute @workgroup_size(256)
+fn resolveCollisions(@builtin(global_invocation_id) global_id: vec3<u32>,
+                    @builtin(local_invocation_id) local_id: vec3<u32>,
+                    @builtin(workgroup_id) workgroup_id: vec3<u32>) {
+    let index = global_id.x;
+    if (index >= params.particleCount) {
+        return;
+    }
+
+    var particle = particles[index];
+    let gridIndex = getGridIndex(particle.x, particle.y);
+    let cols = u32(params.width / params.cellSize);
+    
+    // Load particle data into shared memory
+    sharedParticles[local_id.x] = particle;
+    workgroupBarrier();
+
+    // Process same cell collisions with full physics
+    let cellCount = atomicLoad(&grid.counts[gridIndex]);
+    for (var i = 0u; i < min(cellCount, 64u); i = i + 1u) {
+        let otherIndex = atomicLoad(&grid.data[gridIndex * 64u + i]);
+        if (otherIndex == index || otherIndex >= params.particleCount) {
+            continue;
+        }
+        
+        var other = particles[otherIndex];
+        if (resolveCollisionSimple(&particle, &other)) {
+            particles[otherIndex] = other;
         }
     }
-}
-
-@compute @workgroup_size(256)
-fn resolveCollisions(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(local_invocation_id) local_id: vec3<u32>) {
-    let index = global_id.x;
-    if (index >= params.particleCount) {
-        return;
-    }
-
-    // Load particle into shared memory
-    sharedParticles[local_id.x] = particlesOut[index];
-    var particle = &sharedParticles[local_id.x];
-    let cellIndex = getGridIndex((*particle).x, (*particle).y);
-    if (cellIndex < 0) {
-        return;
-    }
-
-    let baseCellX = i32((*particle).x / params.cellSize);
-    let baseCellY = i32((*particle).y / params.cellSize);
-    var collided = false;
-
-    // Optimized neighbor cell checking
-    for (var dy = -1; dy <= 1; dy++) {
-        for (var dx = -1; dx <= 1; dx++) {
-            let neighborX = baseCellX + dx;
-            let neighborY = baseCellY + dy;
-            
-            if (neighborX < 0 || neighborX >= i32(params.gridCols) || 
-                neighborY < 0 || neighborY >= i32(params.gridRows)) {
+    
+    // Process neighbor cells with hybrid model
+    let cellX = gridIndex % cols;
+    let cellY = gridIndex / cols;
+    let maxDistance = params.cellSize * 2.0;
+    
+    for (var i = 0u; i < 4u; i = i + 1u) {
+        let dx = select(-1, select(0, 1, i == 0u || i == 3u), i == 1u);
+        let dy = select(0, 1, i >= 2u);
+        let nx = i32(cellX) + dx;
+        let ny = i32(cellY) + dy;
+        
+        if (nx < 0 || nx >= i32(cols) || ny < 0 || ny >= i32(params.height / params.cellSize)) {
+            continue;
+        }
+        
+        let neighborIndex = u32(ny) * cols + u32(nx);
+        let neighborCount = atomicLoad(&grid.counts[neighborIndex]);
+        
+        for (var j = 0u; j < min(neighborCount, 64u); j = j + 1u) {
+            let otherIndex = atomicLoad(&grid.data[neighborIndex * 64u + j]);
+            if (otherIndex == index || otherIndex >= params.particleCount) {
                 continue;
             }
-
-            let neighborCellIndex = neighborY * i32(params.gridCols) + neighborX;
-            let particleCount = atomicLoad(&cellCounts[neighborCellIndex]);
             
-            for (var j = 0u; j < min(particleCount, 64u); j++) {
-                let otherIndex = atomicLoad(&grid[neighborCellIndex * 64 + i32(j)]);
-                if (otherIndex == index) {
-                    continue;
-                }
-
-                var other = particlesOut[otherIndex];
-                if (resolveCollision(particle, &other)) {
-                    particlesOut[otherIndex] = other;
-                    collided = true;
-                }
+            var other = particles[otherIndex];
+            // Use hybrid collision detection based on distance
+            if (resolveCollisionSimple(&particle, &other)) {
+                particles[otherIndex] = other;
             }
         }
     }
+    
+    particles[index] = particle;
+}
 
-    if (collided) {
-        particlesOut[index] = *particle;
+@compute @workgroup_size(256)
+fn clearGrid(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let index = global_id.x;
+    let gridSize = u32(params.width / params.cellSize) * u32(params.height / params.cellSize);
+    if (index < gridSize) {
+        atomicStore(&grid.counts[index], 0u);
     }
 }
