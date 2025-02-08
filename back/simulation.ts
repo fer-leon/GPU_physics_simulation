@@ -1,79 +1,61 @@
-import { Particle } from "./particle.ts";
-import { parallelSpatialPartitioning } from "./grid.ts";
+import { GPUSimulation } from "./gpu_simulation.ts";
 
 export class Simulation {
-  particles: Particle[];
+  gpuSim: GPUSimulation;
   width: number;
   height: number;
 
   constructor(particleCount: number = 10, width: number = 800, height: number = 600) {
     this.width = width;
     this.height = height;
-    this.particles = [];
-    
-    for (let i = 0; i < particleCount; i++) {
-      const mass = 1 + Math.random() * 4;
-      const radius = 5 + (mass - 1) * 2.5;
-      
-      const p = new Particle(
-        Math.random() * width,
-        Math.random() * height,
-        mass,
-        radius,
-      );
-      
-      p.vx = (Math.random() - 0.5) * 100;
-      p.vy = (Math.random() - 0.5) * 100;
-      this.particles.push(p);
-    }
+    this.gpuSim = new GPUSimulation(particleCount, width, height);
+  }
+
+  async init(): Promise<void> {
+    await this.gpuSim.init();
   }
 
   async simulateFrame(deltaTime: number): Promise<void> {
-    const substepTime = deltaTime / 4;
-    // Realizar integración física en 4 subpasos
-    for (let i = 0; i < 4; i++) {
-      this.updateParticles(substepTime);
-    }
-    // Ejecutar detección de colisiones una sola vez
-    await parallelSpatialPartitioning(this.particles, this.width, this.height);
-  }
-
-  updateParticles(delta: number): void {
-    for (const particle of this.particles) {
-      particle.vx += particle.ax * delta;
-      particle.vy += particle.ay * delta;
-      particle.x += particle.vx * delta;
-      particle.y += particle.vy * delta;
-      particle.ax = 0;
-      particle.ay = 0;
-    }
+    await this.gpuSim.simulateFrame(deltaTime);
   }
 
   getState(): string {
-    return JSON.stringify({
-      particles: this.particles.map((p) => ({
-        x: p.x,
-        y: p.y,
-        radius: p.radius,
-      })),
-    });
+    return this.gpuSim.getState();
   }
 
   getStateBuffer(): ArrayBuffer {
-    const n = this.particles.length;
-    // 4 bytes para numero de partículas y 12 bytes por partícula (x, y, radio)
-    const buffer = new ArrayBuffer(4 + n * 12);
-    const view = new DataView(buffer);
-    view.setUint32(0, n, true);
-    let offset = 4;
-    for (const p of this.particles) {
-      view.setFloat32(offset, p.x, true);
-      offset += 4;
-      view.setFloat32(offset, p.y, true);
-      offset += 4;
-      view.setFloat32(offset, p.radius, true);
-      offset += 4;
+    return this.gpuSim.getStateBuffer();
+  }
+
+  get particles() {
+    const particleData = this.gpuSim.particles;
+    const result = [];
+    for (let i = 0; i < particleData.length; i += 7) {
+      result.push({
+        id: particleData[i],
+        x: particleData[i + 1],
+        y: particleData[i + 2],
+        vx: particleData[i + 3],
+        vy: particleData[i + 4],
+        mass: particleData[i + 5],
+        radius: particleData[i + 6],
+      });
     }
-    return buffer;
+    return result;
+  }
+
+  set particles(newParticles: Array<any>) {
+    const particleData = new Float32Array(newParticles.length * 7);
+    newParticles.forEach((p, i) => {
+      const base = i * 7;
+      particleData[base] = p.id;
+      particleData[base + 1] = p.x;
+      particleData[base + 2] = p.y;
+      particleData[base + 3] = p.vx;
+      particleData[base + 4] = p.vy;
+      particleData[base + 5] = p.mass;
+      particleData[base + 6] = p.radius;
+    });
+    this.gpuSim.particles = particleData;
   }
 }
