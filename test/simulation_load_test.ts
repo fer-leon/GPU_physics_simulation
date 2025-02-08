@@ -36,13 +36,13 @@ async function runAverageFPSTest(particleCount: number, fpsThreshold: number) {
 }
 
 Deno.test("FPS 1000 partículas", async () => {
-  await runAverageFPSTest(1000, 55);
+  await runAverageFPSTest(1000, 1000);
 });
 
 Deno.test("FPS 5000 partículas", async () => {
-  await runAverageFPSTest(5000, 20);
+  await runAverageFPSTest(5000, 150);
 });
 
-Deno.test("FPS 1000 partículas (segunda ejecución)", async () => {
-  await runAverageFPSTest(1000, 55);
+Deno.test("FPS 15000 partículas", async () => {
+  await runAverageFPSTest(15000, 100);
 });
