@@ -14,6 +14,17 @@ export class GPUSimulation {
   width: number;
   height: number;
 
+  private gridBuffer?: GPUBuffer;
+  private cellCountsBuffer?: GPUBuffer;
+  private updatePipeline?: GPUComputePipeline;
+  private collisionPipeline?: GPUComputePipeline;
+  private updateBindGroup?: GPUBindGroup;
+  private collisionBindGroup?: GPUBindGroup;
+  private cellSize = 30;
+  private gridCols: number;
+  private gridRows: number;
+  private maxParticlesPerCell = 64;
+
   constructor(particleCount: number = 10, width: number = 800, height: number = 600) {
     this.width = width;
     this.height = height;
@@ -33,6 +44,8 @@ export class GPUSimulation {
       this._particles[base + 5] = mass;
       this._particles[base + 6] = radius;
     }
+    this.gridCols = Math.ceil(width / this.cellSize);
+    this.gridRows = Math.ceil(height / this.cellSize);
   }
 
   async init(): Promise<void> {
@@ -59,9 +72,21 @@ export class GPUSimulation {
       // Initialize first buffer with particle data
       this.device.queue.writeBuffer(this.particleBuffers[0], 0, this._particles);
 
+      // Create grid buffers
+      const gridSize = this.gridCols * this.gridRows * this.maxParticlesPerCell;
+      this.gridBuffer = this.device.createBuffer({
+        size: gridSize * 4, // u32 indices
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+
+      this.cellCountsBuffer = this.device.createBuffer({
+        size: this.gridCols * this.gridRows * 4, // u32 counts
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+
       // Create simulation parameters buffer
       this.paramsBuffer = this.device.createBuffer({
-        size: 4 * 4, // 4 f32 values
+        size: 8 * 4, // 8 f32 values
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       });
 
@@ -89,6 +114,27 @@ export class GPUSimulation {
             visibility: GPUShaderStage.COMPUTE,
             buffer: { type: "uniform" }
           }
+        ]
+      });
+
+      // Create bind group layouts
+      const updateBindGroupLayout = this.device.createBindGroupLayout({
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" }},
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" }},
+          { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" }},
+          { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" }},
+          { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" }}
+        ]
+      });
+
+      const collisionBindGroupLayout = this.device.createBindGroupLayout({
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" }},
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" }},
+          { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" }},
+          { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" }},
+          { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" }}
         ]
       });
 
@@ -123,6 +169,50 @@ export class GPUSimulation {
         }
       });
 
+      // Create pipelines
+      this.updatePipeline = this.device.createComputePipeline({
+        layout: this.device.createPipelineLayout({
+          bindGroupLayouts: [updateBindGroupLayout]
+        }),
+        compute: {
+          module: this.device.createShaderModule({ code: shaderCode }),
+          entryPoint: "updatePositions"
+        }
+      });
+
+      this.collisionPipeline = this.device.createComputePipeline({
+        layout: this.device.createPipelineLayout({
+          bindGroupLayouts: [collisionBindGroupLayout]
+        }),
+        compute: {
+          module: this.device.createShaderModule({ code: shaderCode }),
+          entryPoint: "resolveCollisions"
+        }
+      });
+
+      // Create bind groups
+      this.updateBindGroup = this.device.createBindGroup({
+        layout: updateBindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.particleBuffers[0] }},
+          { binding: 1, resource: { buffer: this.particleBuffers[1] }},
+          { binding: 2, resource: { buffer: this.paramsBuffer }},
+          { binding: 3, resource: { buffer: this.gridBuffer }},
+          { binding: 4, resource: { buffer: this.cellCountsBuffer }}
+        ]
+      });
+
+      this.collisionBindGroup = this.device.createBindGroup({
+        layout: collisionBindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.particleBuffers[0] }},
+          { binding: 1, resource: { buffer: this.particleBuffers[1] }},
+          { binding: 2, resource: { buffer: this.paramsBuffer }},
+          { binding: 3, resource: { buffer: this.gridBuffer }},
+          { binding: 4, resource: { buffer: this.cellCountsBuffer }}
+        ]
+      });
+
       this.isGPU = true;
     } catch (e) {
       console.log("WebGPU not available, falling back to CPU simulation");
@@ -131,48 +221,76 @@ export class GPUSimulation {
   }
 
   private async simulateGPU(deltaTime: number): Promise<void> {
-    if (!this.device || !this.particleBuffers || !this.paramsBuffer || !this.bindGroups || !this.computePipeline || !this.stagingBuffer) {
+    if (!this.device || !this.particleBuffers || !this.paramsBuffer || 
+        !this.updatePipeline || !this.collisionPipeline || !this.stagingBuffer ||
+        !this.gridBuffer || !this.cellCountsBuffer || 
+        !this.updateBindGroup || !this.collisionBindGroup) {
       throw new Error("GPU simulation not initialized");
     }
+
+    // Clear grid counters with a zero-filled buffer
+    const clearCountsBuffer = this.device.createBuffer({
+      size: this.gridCols * this.gridRows * 4,
+      usage: GPUBufferUsage.COPY_SRC,
+      mappedAtCreation: true,
+    });
+    new Uint32Array(clearCountsBuffer.getMappedRange()).fill(0);
+    clearCountsBuffer.unmap();
+
+    const commandEncoder = this.device.createCommandEncoder();
+    commandEncoder.copyBufferToBuffer(
+      clearCountsBuffer, 0,
+      this.cellCountsBuffer, 0,
+      this.gridCols * this.gridRows * 4
+    );
 
     // Update simulation parameters
     const paramsData = new Float32Array([
       this.width,
       this.height,
       deltaTime,
-      0.9 // restitution
+      0.9, // restitution
+      this.cellSize,
+      this.gridCols,
+      this.gridRows,
+      this._particles.length / 7, // particle count
     ]);
     this.device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
 
-    // Create command encoder and pass
-    const commandEncoder = this.device.createCommandEncoder();
-    const passEncoder = commandEncoder.beginComputePass();
-    passEncoder.setPipeline(this.computePipeline);
-    passEncoder.setBindGroup(0, this.bindGroups[this.currentBufferIndex]);
+    // First pass: update positions and assign to grid
+    const updatePass = commandEncoder.beginComputePass();
+    updatePass.setPipeline(this.updatePipeline);
+    updatePass.setBindGroup(0, this.updateBindGroup);
+    updatePass.dispatchWorkgroups(Math.ceil(this._particles.length / 7 / 256));
+    updatePass.end();
 
-    // Dispatch workgroups
-    const workgroupSize = 256;
-    const numWorkgroups = Math.ceil(this._particles.length / 7 / workgroupSize);
-    passEncoder.dispatchWorkgroups(numWorkgroups);
-    passEncoder.end();
+    // Second pass: resolve collisions
+    const collisionPass = commandEncoder.beginComputePass();
+    collisionPass.setPipeline(this.collisionPipeline);
+    collisionPass.setBindGroup(0, this.collisionBindGroup);
+    collisionPass.dispatchWorkgroups(Math.ceil(this._particles.length / 7 / 256));
+    collisionPass.end();
 
-    // Copy results to staging buffer
+    // Copy results back
     commandEncoder.copyBufferToBuffer(
-      this.particleBuffers[1 - this.currentBufferIndex],
+      this.particleBuffers[1],
       0,
       this.stagingBuffer,
       0,
       this._particles.byteLength
     );
 
-    // Submit commands and read results
+    // Submit all commands at once
     this.device.queue.submit([commandEncoder.finish()]);
+
+    // Clean up
+    clearCountsBuffer.destroy();
+
+    // Read back results only when needed (e.g., for rendering)
     await this.stagingBuffer.mapAsync(GPUMapMode.READ);
     const data = new Float32Array(this.stagingBuffer.getMappedRange());
     this._particles.set(data);
     this.stagingBuffer.unmap();
-
-    this.currentBufferIndex = 1 - this.currentBufferIndex;
   }
 
   private simulateCPU(deltaTime: number): void {
