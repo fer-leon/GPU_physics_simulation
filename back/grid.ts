@@ -20,6 +20,3 @@ export async function parallelSpatialPartitioning(
         }
     }
 }
-
-// Clean up function (no-op since workers are managed by GPU simulation)
-export function terminateWorkerPool(): void {}

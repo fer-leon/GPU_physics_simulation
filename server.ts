@@ -54,7 +54,5 @@ export function stopSimulation(): void {
     clearInterval(simulationInterval);
     simulationInterval = null;
   }
-  // Terminate created workers
-  import("./back/grid.ts").then(({ terminateWorkerPool }) => terminateWorkerPool());
   console.log("Simulation stopped.");
 }
