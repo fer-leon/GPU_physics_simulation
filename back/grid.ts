@@ -2,11 +2,11 @@ import { Particle } from "./particle.ts";
 import { resolveParticleCollision } from "./collision.ts";
 
 // Simplified CPU implementation for testing purposes
-export async function parallelSpatialPartitioning(
+export function parallelSpatialPartitioning(
     particles: Particle[],
-    width: number,
-    height: number,
-): Promise<void> {
+    _width: number,
+    _height: number,
+): void {
     for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
             const changes = resolveParticleCollision(particles[i], particles[j], 0.9);

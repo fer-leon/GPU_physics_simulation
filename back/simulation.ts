@@ -1,5 +1,15 @@
 import { GPUSimulation } from "./gpu_simulation.ts";
 
+interface SimParticle {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  mass: number;
+  radius: number;
+}
+
 export class Simulation {
   gpuSim: GPUSimulation;
   width: number;
@@ -44,7 +54,7 @@ export class Simulation {
     return result;
   }
 
-  set particles(newParticles: Array<any>) {
+  set particles(newParticles: SimParticle[]) {
     const particleData = new Float32Array(newParticles.length * 7);
     newParticles.forEach((p, i) => {
       const base = i * 7;
