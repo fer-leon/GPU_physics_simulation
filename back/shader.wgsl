@@ -83,14 +83,14 @@ fn resolveCollisionSimple(p1: ptr<function, Particle>, p2: ptr<function, Particl
     let minDist = (*p1).radius + (*p2).radius;
     let minDistSq = minDist * minDist;
     
-    // Ignorar partículas que no están en contacto
+    // Ignore particles that are not in contact
     if (distSq >= minDistSq || distSq == 0.0) { return false; }
     
     let dist = sqrt(distSq);
     let nx = dx / dist;
     let ny = dy / dist;
     
-    // Primero separamos las partículas
+    // First separate the particles
     let overlap = (minDist - dist);
     let totalMass = (*p1).mass + (*p2).mass;
     let p1Ratio = (*p2).mass / totalMass;
@@ -101,20 +101,20 @@ fn resolveCollisionSimple(p1: ptr<function, Particle>, p2: ptr<function, Particl
     (*p2).x = (*p2).x + nx * overlap * p2Ratio;
     (*p2).y = (*p2).y + ny * overlap * p2Ratio;
     
-    // Calcular velocidad relativa
+    // Calculate relative velocity
     let dvx = (*p2).vx - (*p1).vx;
     let dvy = (*p2).vy - (*p1).vy;
     let normalVel = dvx * nx + dvy * ny;
     
-    // Solo resolver colisión si las partículas se acercan
+    // Only resolve collision if particles are approaching
     if (normalVel >= 0.0) { return true; }
     
-    // Calcular impulso con masa
+    // Calculate impulse with mass
     let restitution = params.restitution;
     let j = -(1.0 + restitution) * normalVel;
     j = j / (1.0/(*p1).mass + 1.0/(*p2).mass);
     
-    // Aplicar impulso
+    // Apply impulse
     (*p1).vx = (*p1).vx - j * nx / (*p1).mass;
     (*p1).vy = (*p1).vy - j * ny / (*p1).mass;
     (*p2).vx = (*p2).vx + j * nx / (*p2).mass;
@@ -132,7 +132,7 @@ fn updatePositions(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var particle = particles[index];
     
-    // Aplicar límite de velocidad
+    // Apply speed limit
     let maxSpeed = 200.0;
     let currentSpeed = sqrt(particle.vx * particle.vx + particle.vy * particle.vy);
     if (currentSpeed > maxSpeed) {
@@ -141,7 +141,7 @@ fn updatePositions(@builtin(global_invocation_id) global_id: vec3<u32>) {
         particle.vy *= scale;
     }
     
-    // Actualizar posición con fricción
+    // Update position with friction
     let dt = params.deltaTime;
     let friction = 0.999;
     particle.vx *= friction;
@@ -150,7 +150,7 @@ fn updatePositions(@builtin(global_invocation_id) global_id: vec3<u32>) {
     particle.x = particle.x + particle.vx * dt;
     particle.y = particle.y + particle.vy * dt;
     
-    // Colisiones con bordes
+    // Boundary collisions
     let maxX = params.width - particle.radius;
     let maxY = params.height - particle.radius;
     let minX = particle.radius;
@@ -172,7 +172,7 @@ fn updatePositions(@builtin(global_invocation_id) global_id: vec3<u32>) {
         particle.vy = -abs(particle.vy) * params.restitution;
     }
     
-    // Actualizar grid
+    // Update grid
     let gridIndex = getGridIndex(particle.x, particle.y);
     let count = atomicAdd(&grid.counts[gridIndex], 1u);
     if (count < 64u) {

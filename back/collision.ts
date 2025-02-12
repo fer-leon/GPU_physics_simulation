@@ -26,13 +26,13 @@ export function resolveParticleCollision(a: Particle, b: Particle, restitution: 
     const impulseX = impulse * nx;
     const impulseY = impulse * ny;
     
-    // Calcular nuevos valores
+    // Calculate new values
     const aVx = a.vx - impulseX / a.mass;
     const aVy = a.vy - impulseY / a.mass;
     const bVx = b.vx + impulseX / b.mass;
     const bVy = b.vy + impulseY / b.mass;
     
-    // Separación de partículas
+    // Separate particles
     const overlap = (minDist - distance) / 2;
     const aX = a.x - nx * overlap;
     const aY = a.y - ny * overlap;

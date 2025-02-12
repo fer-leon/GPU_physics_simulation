@@ -27,22 +27,22 @@ async function runAverageFPSTest(particleCount: number, fpsThreshold: number) {
   }
   
   const avgFps = fpsList.reduce((a, b) => a + b) / iterations;
-  console.log(`FPS promedio para ${particleCount} partículas: ${avgFps.toFixed(2)} fps (${iterations} iteraciones)`);
-  console.log(`FPS individuales: ${fpsList.map(fps => fps.toFixed(2)).join(", ")}`);
+  console.log(`Average FPS for ${particleCount} particles: ${avgFps.toFixed(2)} fps (${iterations} iterations)`);
+  console.log(`Individual FPS: ${fpsList.map(fps => fps.toFixed(2)).join(", ")}`);
   
   if (avgFps < fpsThreshold) {
-    throw new Error(`La simulación con ${particleCount} partículas es demasiado lenta (${avgFps.toFixed(2)} fps < ${fpsThreshold} fps)`);
+    throw new Error(`Simulation with ${particleCount} particles is too slow (${avgFps.toFixed(2)} fps < ${fpsThreshold} fps)`);
   }
 }
 
-Deno.test("FPS 1000 partículas", async () => {
+Deno.test("FPS with 1000 particles", async () => {
   await runAverageFPSTest(1000, 1000);
 });
 
-Deno.test("FPS 5000 partículas", async () => {
+Deno.test("FPS with 5000 particles", async () => {
   await runAverageFPSTest(5000, 150);
 });
 
-Deno.test("FPS 15000 partículas", async () => {
+Deno.test("FPS with 15000 particles", async () => {
   await runAverageFPSTest(15000, 100);
 });

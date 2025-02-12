@@ -1,4 +1,4 @@
-import { resolveBoundaryCollision, resolveParticleCollision } from "./collision.ts";
+import { resolveParticleCollision } from "./collision.ts";
 import type { Particle } from "./particle.ts";
 import type { CollisionResult } from "./collision.ts";
 

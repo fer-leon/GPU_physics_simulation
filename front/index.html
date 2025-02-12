@@ -1,10 +1,9 @@
-<!-- front/index.html -->
 <!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Simulación de Colisiones</title>
+    <title>Collision Simulation</title>
     <style>
       body {
         margin: 0;
@@ -37,7 +36,7 @@
       resizeCanvas();
       window.addEventListener('resize', resizeCanvas);
 
-      // Conexión WebSocket para recibir estados de simulación
+      // WebSocket connection for receiving simulation states
       const ws = new WebSocket("ws://localhost:8001");
       ws.binaryType = "arraybuffer";
       ws.onmessage = (event) => {
@@ -55,7 +54,7 @@
             offset += 4;
             particles.push({ x, y, radius });
           }
-          // Inicializar ambos estados en la primera recepción
+          // Initialize both states on first reception
           if (!currentState) {
             currentState = { particles };
             previousState = { particles };
@@ -67,37 +66,37 @@
         lastUpdate = performance.now();
       };
       ws.onopen = () => {
-        console.log("Conectado al WebSocket");
+        console.log("Connected to WebSocket");
       };
       ws.onerror = (err) => {
-        console.error("Error en WebSocket:", err);
+        console.error("WebSocket error:", err);
       };
 
-      // Función para interpolar entre dos estados
+      // Function to interpolate between two states
       function interpolate(prev, curr, t) {
-        if (!previousState || !currentState) return; // Evita acceso a propiedades de null
+        if (!previousState || !currentState) return;
         const interpParticles = curr.particles.map((p, i) => {
           if (!prev || !prev.particles[i]) return p;
           const pPrev = prev.particles[i];
           return {
             x: pPrev.x + (p.x - pPrev.x) * t,
             y: pPrev.y + (p.y - pPrev.y) * t,
-            radius: p.radius, // Suponiendo que el radio no cambia
+            radius: p.radius, // Radius doesn't change
           };
         });
         return { particles: interpParticles };
       }
 
-      // Bucle de renderizado con requestAnimationFrame
+      // Render loop with requestAnimationFrame
       function render() {
         requestAnimationFrame(render);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // Calcula el factor de interpolación basado en el tiempo transcurrido
+        // Calculate interpolation factor based on elapsed time
         const now = performance.now();
-        // Supongamos que esperamos recibir actualizaciones a 60 fps (cada ~16ms)
+        // Expect updates at 60 fps (~16ms)
         const delta = now - lastUpdate;
         let t = Math.min(delta / 16, 1);
-        // Si no se tiene estado previo, se usa el actual directamente
+        // Use current state directly if no previous state exists
         const displayState = interpolate(previousState, currentState, t) || currentState;
 
         if (displayState && displayState.particles) {

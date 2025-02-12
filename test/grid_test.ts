@@ -8,22 +8,10 @@ Deno.test("spatialPartitioning handles collisions in same cell", async () => {
     particle1.vx = 2;
     particle2.vx = -1;
 
-    // Esperar a que la detección paralela se complete
+    // Wait for parallel detection to complete
     await parallelSpatialPartitioning([particle1, particle2], 800, 600);
     
-    // Se espera que los cambios se apliquen sobre los objetos originales
+    // Changes should be applied to the original objects
     assertAlmostEquals(particle1.vx, -0.85, 1e-9);
     assertAlmostEquals(particle2.vx, 1.85, 1e-9);
-});
-
-Deno.test("parallelSpatialPartitioning maneja colisiones en la misma celda", async () => {
-  const particle1 = new Particle(100, 100, 1, 1);
-  const particle2 = new Particle(101.5, 100, 1, 1);
-  particle1.vx = 2;
-  particle2.vx = -1;
-
-  await parallelSpatialPartitioning([particle1, particle2], 800, 600);
-
-  assertAlmostEquals(particle1.vx, -0.85, 1e-9);
-  assertAlmostEquals(particle2.vx, 1.85, 1e-9);
 });

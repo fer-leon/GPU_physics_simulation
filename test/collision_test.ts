@@ -7,9 +7,9 @@ Deno.test("resolveParticleCollision swaps velocities and separates particles", (
   const b = new Particle(2, 0, 1, 1.5);
   a.vx = 2;
   b.vx = -2;
-  // Obtener cambios sin modificar in situ
+  // Get changes without in-place modification
   const changes = resolveParticleCollision(a, b, 1);
-  // Aplicar los cambios retornados
+  // Apply returned changes
   for (const change of changes) {
     if (change.id === a.id) {
       if (change.vx !== undefined) a.vx = change.vx;
@@ -23,7 +23,7 @@ Deno.test("resolveParticleCollision swaps velocities and separates particles", (
   }
   assertEquals(a.vx, -2);
   assertEquals(b.vx, 2);
-  // La separación entre centros debe ser igual a la suma de los radios (3)
+  // Center distance should equal sum of radii (3)
   assertEquals(Math.hypot(b.x - a.x, b.y - a.y), 3);
 });
 
@@ -31,9 +31,9 @@ Deno.test("resolveBoundaryCollision corrects position and velocity", () => {
   const width = 800, height = 600;
   const p = new Particle(810, 300, 1, 10);
   p.vx = 10;
-  // Obtener cambio
+  // Get changes
   const change = resolveBoundaryCollision(p, width, height, 0.5);
-  // Aplicar el cambio si corresponde
+  // Apply changes if present
   if (change.x !== undefined) p.x = change.x;
   if (change.vx !== undefined) p.vx = change.vx;
   

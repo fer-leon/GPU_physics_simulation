@@ -1,14 +1,14 @@
 import { WebSocketServer } from "https://deno.land/x/websocket@v0.1.4/mod.ts";
 import { Simulation } from "./back/simulation.ts";
 
-// Se lee el HTML del cliente desde el sistema de archivos.
+// Read client HTML from filesystem
 const html = await Deno.readTextFile("front/index.html");
 
-// Inicializa la simulación, que se actualizará periódicamente.
+// Initialize simulation that will be updated periodically
 const simulation = new Simulation(5000, 4000, 3200);
 let simulationInterval: number | null = null;
 
-// Crea un servidor HTTP que responde según la URL.
+// Create HTTP server that responds based on URL
 Deno.serve({
   port: 8000,
   handler: (req) => {
@@ -23,38 +23,38 @@ Deno.serve({
   },
 });
 
-console.log("Servidor HTTP en http://localhost:8000/");
+console.log("HTTP server running at http://localhost:8000/");
 
-// Se crea el WebSocket server en el puerto 8001 para transmitir el estado de la simulación.
+// Create WebSocket server on port 8001 for simulation state transmission
 const wss = new WebSocketServer(8001);
 
-// Maneja nuevas conexiones de WebSocket.
+// Handle new WebSocket connections
 wss.on("connection", (_ws) => {
-  console.log("Cliente conectado al WebSocket");
+  console.log("Client connected to WebSocket");
 });
 
-// Intervalo de actualización para la simulación (aprox. 60 fps)
-const frameTime = 0.016; // en segundos
+// Update interval for simulation (approx. 60 fps)
+const frameTime = 0.016; // in seconds
 simulationInterval = setInterval(async () => {
   await simulation.simulateFrame(frameTime);
   const stateBuffer = simulation.getStateBuffer();
-  // Se envía el estado actualizado a todos los clientes conectados.
+  // Send updated state to all connected clients
   for (const client of wss.clients) {
     try {
       client.send(new Uint8Array(stateBuffer));
     } catch (error) {
-      console.error("Error al enviar a cliente:", error);
+      console.error("Error sending to client:", error);
     }
   }
 }, frameTime * 1000);
 
-// Función para detener la simulación, por ejemplo, al recibir cierta señal
+// Function to stop simulation, e.g., on receiving a signal
 export function stopSimulation(): void {
   if (simulationInterval !== null) {
     clearInterval(simulationInterval);
     simulationInterval = null;
   }
-  // Terminar los workers creados
+  // Terminate created workers
   import("./back/grid.ts").then(({ terminateWorkerPool }) => terminateWorkerPool());
-  console.log("Simulación detenida.");
+  console.log("Simulation stopped.");
 }

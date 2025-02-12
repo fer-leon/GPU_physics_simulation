@@ -1,12 +1,12 @@
 import { Particle } from "./particle.ts";
 import { resolveParticleCollision } from "./collision.ts";
 
+// Simplified CPU implementation for testing purposes
 export async function parallelSpatialPartitioning(
     particles: Particle[],
     width: number,
     height: number,
 ): Promise<void> {
-    // Implementación simplificada para tests
     for (let i = 0; i < particles.length; i++) {
         for (let j = i + 1; j < particles.length; j++) {
             const changes = resolveParticleCollision(particles[i], particles[j], 0.9);
@@ -21,6 +21,5 @@ export async function parallelSpatialPartitioning(
     }
 }
 
-export function terminateWorkerPool(): void {
-    // Ya no es necesario ya que no hay workers
-}
+// Clean up function (no-op since workers are managed by GPU simulation)
+export function terminateWorkerPool(): void {}
