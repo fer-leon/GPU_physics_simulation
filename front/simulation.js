@@ -35,7 +35,7 @@ function updateCanvasSize() {
   canvas.height = simHeight * scale;
 }
 
-window.addEventListener('resize', updateCanvasSize);
+globalThis.addEventListener('resize', updateCanvasSize);
 
 function updateConnectionStatus(status) {
   const statusElement = document.getElementById('connection-status');
@@ -139,7 +139,7 @@ function render() {
   
   const now = performance.now();
   const delta = now - lastUpdate;
-  let t = Math.min(delta / 16, 1);
+  const t = Math.min(delta / 16, 1);
   
   const displayState = interpolate(previousState, currentState, t) || currentState;
 

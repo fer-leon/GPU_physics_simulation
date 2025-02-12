@@ -3,9 +3,6 @@ import { Simulation } from "./back/simulation.ts";
 import { contentType } from "https://deno.land/std@0.202.0/media_types/mod.ts";
 import { join } from "https://deno.land/std@0.202.0/path/mod.ts";
 
-// Read client HTML from filesystem
-const html = await Deno.readTextFile("front/index.html");
-
 // Initialize simulation that will be updated periodically
 const simulation = new Simulation(5000, 4000, 3200);
 let simulationInterval: number | null = null;
@@ -46,8 +43,8 @@ Deno.serve({
       return new Response(file, {
         headers: { "content-type": mimeType }
       });
-    } catch (e) {
-      if (e instanceof Deno.errors.NotFound) {
+    } catch (_e) {
+      if (_e instanceof Deno.errors.NotFound) {
         return new Response("404 Not Found", { status: 404 });
       }
       return new Response("500 Internal Server Error", { status: 500 });
@@ -87,8 +84,8 @@ wss.on("connection", (ws) => {
   });
 
   // Handle connection errors
-  ws.on("error", (error) => {
-    console.error("WebSocket error:", error);
+  ws.on("error", (_error) => {
+    console.error("WebSocket error:", _error);
     // Remove client on error to maintain accurate count
     activeClients.delete(ws);
     lastClientCount = activeClients.size;
@@ -105,14 +102,14 @@ simulationInterval = setInterval(async () => {
   for (const client of wss.clients) {
     try {
       client.send(new Uint8Array(stateBuffer));
-    } catch (error) {
+    } catch (_error) {
       console.error("Error sending to client");
       // Try to close the connection if it appears to be broken
       try {
         client.close();
         activeClients.delete(client);
         lastClientCount = activeClients.size;
-      } catch (closeError) {
+      } catch (_closeError) {
         console.error("Error closing broken connection");
       }
     }
