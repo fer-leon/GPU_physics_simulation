@@ -5,111 +5,133 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Collision Simulation</title>
     <style>
+      :root {
+        --primary-color: #2c3e50;
+        --accent-color: #3498db;
+        --text-color: #333;
+        --bg-color: #ecf0f1;
+        --panel-bg: rgba(255, 255, 255, 0.9);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
         overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        display: grid;
+        grid-template-columns: 1fr auto;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .simulation-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
         display: flex;
         justify-content: center;
         align-items: center;
-        width: 100vw;
-        height: 100vh;
-        background-color: #f0f0f0;
+        background-color: var(--primary-color);
       }
+
       canvas {
-        background-color: #eee;
+        background-color: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .info-panel {
+        width: 300px;
+        padding: 20px;
+        background-color: var(--panel-bg);
+        border-left: 1px solid rgba(0, 0, 0, 0.1);
+        overflow-y: auto;
+      }
+
+      .info-section {
+        margin-bottom: 20px;
+      }
+
+      .info-section h2 {
+        color: var(--primary-color);
+        font-size: 1.2em;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid var(--accent-color);
+      }
+
+      .info-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+      }
+
+      .info-label {
+        color: var(--text-color);
+        font-weight: 500;
+      }
+
+      .info-value {
+        color: var(--accent-color);
+        font-family: monospace;
+      }
+
+      .connection-status {
+        padding: 8px;
+        margin-bottom: 15px;
+        border-radius: 4px;
+        text-align: center;
+        font-weight: 500;
+      }
+
+      .connection-status.connected {
+        background-color: #27ae60;
+        color: white;
+      }
+
+      .connection-status.disconnected {
+        background-color: #e74c3c;
+        color: white;
+      }
+
+      .connection-status.connecting {
+        background-color: #f1c40f;
+        color: #2c3e50;
       }
     </style>
   </head>
   <body>
-    <canvas id="canvas"></canvas>
-    <script>
-      const canvas = document.getElementById("canvas");
-      const ctx = canvas.getContext("2d");
-      let previousState = null;
-      let currentState = null;
-      let lastUpdate = performance.now();
+    <div class="simulation-container">
+      <canvas id="canvas"></canvas>
+    </div>
+    <div class="info-panel">
+      <div class="connection-status disconnected" id="connection-status">
+        Desconectado
+      </div>
+      <div class="info-section">
+        <h2>Simulation Info</h2>
+        <div class="info-item">
+          <span class="info-label">Width</span>
+          <span class="info-value" id="sim-width">-</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Height</span>
+          <span class="info-value" id="sim-height">-</span>
+        </div>
+        <div class="info-item">
+          <span class="info-label">Particles</span>
+          <span class="info-value" id="particle-count">-</span>
+        </div>
+      </div>
+    </div>
 
-      function resizeCanvas() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-      }
-      resizeCanvas();
-      window.addEventListener('resize', resizeCanvas);
-
-      // WebSocket connection for receiving simulation states
-      const ws = new WebSocket("ws://localhost:8001");
-      ws.binaryType = "arraybuffer";
-      ws.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          const view = new DataView(event.data);
-          const n = view.getUint32(0, true);
-          const particles = [];
-          let offset = 4;
-          for (let i = 0; i < n; i++) {
-            const x = view.getFloat32(offset, true);
-            offset += 4;
-            const y = view.getFloat32(offset, true);
-            offset += 4;
-            const radius = view.getFloat32(offset, true);
-            offset += 4;
-            particles.push({ x, y, radius });
-          }
-          // Initialize both states on first reception
-          if (!currentState) {
-            currentState = { particles };
-            previousState = { particles };
-          } else {
-            previousState = currentState;
-            currentState = { particles };
-          }
-        }
-        lastUpdate = performance.now();
-      };
-      ws.onopen = () => {
-        console.log("Connected to WebSocket");
-      };
-      ws.onerror = (err) => {
-        console.error("WebSocket error:", err);
-      };
-
-      // Function to interpolate between two states
-      function interpolate(prev, curr, t) {
-        if (!previousState || !currentState) return;
-        const interpParticles = curr.particles.map((p, i) => {
-          if (!prev || !prev.particles[i]) return p;
-          const pPrev = prev.particles[i];
-          return {
-            x: pPrev.x + (p.x - pPrev.x) * t,
-            y: pPrev.y + (p.y - pPrev.y) * t,
-            radius: p.radius, // Radius doesn't change
-          };
-        });
-        return { particles: interpParticles };
-      }
-
-      // Render loop with requestAnimationFrame
-      function render() {
-        requestAnimationFrame(render);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // Calculate interpolation factor based on elapsed time
-        const now = performance.now();
-        // Expect updates at 60 fps (~16ms)
-        const delta = now - lastUpdate;
-        let t = Math.min(delta / 16, 1);
-        // Use current state directly if no previous state exists
-        const displayState = interpolate(previousState, currentState, t) || currentState;
-
-        if (displayState && displayState.particles) {
-          displayState.particles.forEach(particle => {
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, particle.radius, 0, 2 * Math.PI);
-            ctx.fillStyle = "blue";
-            ctx.fill();
-            ctx.stroke();
-          });
-        }
-      }
-      render();
-    </script>
+    <script src="simulation.js"></script>
   </body>
 </html>
